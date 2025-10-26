@@ -2,66 +2,74 @@ pipeline {
     agent any
 
     environment {
-        DOCKERHUB_CREDENTIALS = credentials('dockerhub-credentials-id')
-        IMAGE_NAME = 'your-dockerhub-username/flask-app'
-        IMAGE_TAG = "latest"
+        // Use Jenkins credentials securely; DO NOT hardcode username/password
+        DOCKERHUB_CREDENTIALS = credentials('mahesh-dockerhub')  // Jenkins credential ID
+        IMAGE_NAME = 'maheshzero/maheshzero-flask'               // DockerHub repository
+        IMAGE_TAG = 'latest'
+        WORKDIR = 'C:/Users/mahes/OneDrive/Desktop/dockder/devOps-challenge-1/submissions/Maheshzero'
     }
 
     stages {
-
-        stage('Checkout Code') {
+        stage('Build Stage') {
             steps {
-                checkout scm
-            }
-        }
-
-        stage('Build Docker Image') {
-            steps {
-                script {
-                    sh 'docker build -t $IMAGE_NAME:$IMAGE_TAG .'
+                echo "Stage 1: Building Docker image"
+                dir("${WORKDIR}") {
+                    bat "docker build -t ${IMAGE_NAME}:${IMAGE_TAG} ."
+                    echo "Docker image built successfully: ${IMAGE_NAME}:${IMAGE_TAG}"
                 }
             }
         }
 
-        stage('Run Tests') {
+        stage('Test Stage') {
             steps {
-                script {
-                    // Replace this with your actual test command
-                    sh 'echo "Running tests..."'
+                echo "Stage 2: Running tests inside Docker container"
+                dir("${WORKDIR}") {
+                    bat "docker run --rm ${IMAGE_NAME}:${IMAGE_TAG} pytest"
+                }
+            }
+            post {
+                failure {
+                    echo "Tests failed. Pipeline will stop here."
+                    error("Aborting further stages due to test failure.")
                 }
             }
         }
 
-        stage('Push Docker Image') {
+        stage('Push Stage') {
             steps {
-                script {
-                    sh '''
-                    echo $DOCKERHUB_CREDENTIALS_PSW | docker login -u $DOCKERHUB_CREDENTIALS_USR --password-stdin
-                    docker push $IMAGE_NAME:$IMAGE_TAG
-                    docker logout
-                    '''
-                }
+                echo "Stage 3: Pushing Docker image to DockerHub"
+                // Use Jenkins credentials safely
+                bat """
+                docker login -u %DOCKERHUB_CREDENTIALS_USR% -p %DOCKERHUB_CREDENTIALS_PSW%
+                docker push ${IMAGE_NAME}:${IMAGE_TAG}
+                """
+                echo "Docker image pushed successfully."
             }
         }
 
-        stage('Deploy to Kubernetes') {
+        stage('Deploy Stage') {
             steps {
-                script {
-                    sh '''
-                    kubectl apply -f deployment.yaml
-                    kubectl apply -f service.yaml
-                    '''
-                }
+                echo "Stage 4: Deploying container locally"
+                // Ensure previous container is stopped to avoid port conflicts
+                bat """
+                docker stop $(docker ps -q --filter "ancestor=${IMAGE_NAME}:${IMAGE_TAG}") || echo 'No old container running'
+                docker rm $(docker ps -aq --filter "ancestor=${IMAGE_NAME}:${IMAGE_TAG}") || echo 'No old container to remove'
+                docker run -d -p 5000:5000 ${IMAGE_NAME}:${IMAGE_TAG}
+                """
+                echo "Container deployed locally and accessible on port 5000."
             }
         }
     }
 
     post {
-        success {
-            echo 'Pipeline executed successfully.'
+        always {
+            echo "Pipeline finished."
         }
         failure {
-            echo 'Pipeline failed. Check logs for details.'
+            echo "Pipeline failed. Check the logs above for details."
+        }
+        success {
+            echo "Pipeline completed successfully!"
         }
     }
 }
